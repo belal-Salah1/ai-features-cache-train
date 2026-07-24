@@ -14,9 +14,9 @@ return new class extends Migration
         Schema::create('ai_logs', function (Blueprint $table) {
             $table->id();
             $table->text('prompt');
-            $table->text('response');
+            $table->text('response')->nullable();
             $table->string('model')->nullable();
-            $table->integer('errorMessage')->nullable(); 
+            $table->text('error_message')->nullable();
             $table->string('request_id')->nullable();
             $table->string('call_site')->nullable();
             $table->timestamps();
