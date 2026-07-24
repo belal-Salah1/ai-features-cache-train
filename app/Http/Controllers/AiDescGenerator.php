@@ -1,7 +1,7 @@
 <?php
 
 namespace App\Http\Controllers;
-
+use App\services\AiDescService;
 use Illuminate\Http\Request;
 
 class AiDescGenerator extends Controller
