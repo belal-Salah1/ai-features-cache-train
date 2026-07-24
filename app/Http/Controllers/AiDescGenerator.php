@@ -1,8 +1,9 @@
 <?php
 
 namespace App\Http\Controllers;
-use App\services\AiDescService;
+use App\Http\Requests\productRequest;
 use Illuminate\Http\Request;
+use App\jobs\GenerateDescText;
 
 class AiDescGenerator extends Controller
 {
@@ -11,8 +12,14 @@ class AiDescGenerator extends Controller
     {
         return inertia('AiTest');
     }
-    public function generateAiDesc(Request $request)
+    public function generateAiDesc(productRequest $request)
     {
-
+        $validatedData = request()->validated();
+        // Process the validated data
+        Log::channel('ai')->info('start generating description',[
+            
+        ]);
+        $generatedDesc = $this->dispatch(new GenerateDescText($validatedData));
+        return response()->json(['message' => 'Text generation job dispatched successfully.' , 'data' => $generatedDesc]);
     }
 }

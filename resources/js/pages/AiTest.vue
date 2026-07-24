@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head } from '@inertiajs/vue3';
+import { Head, router } from '@inertiajs/vue3';
 import { ref } from 'vue';
 
 // --- UI state only. Add your generation logic below. ---
@@ -11,9 +11,33 @@ const error = ref('');
 const loading = ref(false);
 
 function generate() {
-    // TODO: your logic here.
-    // Send productName.value / details.value to POST /ai/generate-text
-    // then set result.value (and error.value / loading.value as needed).
+    loading.value = true;
+    error.value = '';
+    result.value = '';
+
+    router.post(
+        '/ai/generate-text',
+        {
+            name: productName.value, // must match the ProductRequest `name` rule
+            details: details.value,
+        },
+        {
+            preserveScroll: true,
+            // router expects an Inertia response: controller should
+            // return back()->with('result', $description) (flash shared via HandleInertiaRequests).
+            onSuccess: (page) => {
+                result.value =
+                    (page.props.flash as { result?: string } | undefined)?.result ?? '';
+            },
+            onError: (errors) => {
+                error.value =
+                    (Object.values(errors)[0] as string) ?? 'An error occurred.';
+            },
+            onFinish: () => {
+                loading.value = false;
+            },
+        },
+    );
 }
 </script>
 
