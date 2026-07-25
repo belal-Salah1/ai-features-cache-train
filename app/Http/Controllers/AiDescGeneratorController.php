@@ -29,7 +29,7 @@ class AiDescGeneratorController extends Controller
             'generated_text' => null,
         ], now()->addMinutes(10));
 
-        GenerateDescText::dispatch($validatedData);
+        GenerateDescText::dispatch($validatedData, app()->make(textGeneratorService::class));
 
         Log::channel('products')->info('ai enhancement job queued', [
             'job_id' => $jobId,
