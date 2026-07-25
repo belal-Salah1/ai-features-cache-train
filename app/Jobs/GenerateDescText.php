@@ -2,75 +2,76 @@
 
 namespace App\Jobs;
 
-use App\aiTextGeneration;
-use App\Services\textGeneratorService;
-use cache;
+use App\Services\TextGeneratorService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class GenerateDescText implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
-    /**
-     * Create a new job instance.
-     */
     public int $tries = 3;
 
-    public int $timeout = 120; // Set the timeout to 120 seconds (2 minutes)
+    public int $timeout = 120; // 2 minutes
 
-    public array $backoff = [10, 30, 60]; // Retry after 10 seconds, then 30 seconds, then 60 seconds
+    public array $backoff = [10, 30, 60]; // retry after 10s, then 30s, then 60s
 
-    public int $uniqueFor = 600; // The job will be unique for 1 hour (3600 seconds)
+    public int $uniqueFor = 600; // unique lock held for 10 minutes
 
-    public int $maxExceptions = 3; // Maximum number of exceptions before failing the job
+    public int $maxExceptions = 3;
 
-    public function __construct(public array $data, protected textGeneratorService $textGeneratorService)
+    public function __construct(public array $data)
     {
         $this->onQueue('ai_desc_generation');
     }
 
-    
+    /**
+     * Single source of truth for the status cache key. The controller, this job,
+     * and the status endpoint all derive the key from here so they read/write
+     * the same cache entry.
+     */
+    public static function cacheKey(string $jobId): string
+    {
+        return 'ai_desc_'.$jobId;
+    }
 
     public function uniqueId(): string
     {
-        return "product-desc-ai-proccess{$this->data['product_id']}";
+        return 'ai-desc-'.$this->data['job_id'];
     }
 
     public function tags(): array
     {
         return [
             'ai_desc_generation',
-            'product:'.$this->data['product_id'],
+            'job:'.$this->data['job_id'],
             'user:'.($this->data['user_id'] ?? 'system'),
         ];
     }
 
-    /**
-     * Execute the job.
-     */
-    public function handle(): void
+    public function handle(TextGeneratorService $textGeneratorService): void
     {
-        $cacheKey = 'ai_desc_'.$this->data['job_id'];
+        $cacheKey = self::cacheKey($this->data['job_id']);
+
         Log::channel('ai_desc_generation')->info('Starting AI description generation job', [
-            'product_id' => $this->data['product_id'],
-            'user_id' => $this->data['user_id'] ?? null,
             'job_id' => $this->data['job_id'],
+            'user_id' => $this->data['user_id'] ?? null,
         ]);
+
         try {
-            cache::put($cacheKey, [
+            Cache::put($cacheKey, [
                 'status' => 'processing',
                 'progress' => 10,
                 'step' => 'Generating AI description job started',
                 'generated_text' => null,
             ], now()->addMinutes(10));
 
-            $generatedText = $this->textGeneratorService->generateText($this->data);
+            $generatedText = $textGeneratorService->generateText($this->data);
 
-            cache::put($cacheKey, [
+            Cache::put($cacheKey, [
                 'status' => 'completed',
                 'progress' => 100,
                 'step' => 'AI description generation completed',
@@ -78,35 +79,32 @@ class GenerateDescText implements ShouldBeUnique, ShouldQueue
             ], now()->addMinutes(10));
 
             Log::channel('ai_desc_generation')->info('AI description generation completed', [
-                'product_id' => $this->data['product_id'],
-                'user_id' => $this->data['user_id'] ?? null,
                 'job_id' => $this->data['job_id'],
-                'generated_text' => $generatedText,
+                'user_id' => $this->data['user_id'] ?? null,
             ]);
-
         } catch (\Throwable $exception) {
             Log::channel('ai_desc_generation')->error('Error in AI description generation job', [
-                'product_id' => $this->data['product_id'],
+                'job_id' => $this->data['job_id'],
                 'user_id' => $this->data['user_id'] ?? null,
                 'error' => $exception->getMessage(),
             ]);
-            cache::put($cacheKey, [
+
+            Cache::put($cacheKey, [
                 'status' => 'failed',
                 'progress' => 0,
                 'step' => 'AI description generation failed',
                 'generated_text' => null,
                 'error' => $exception->getMessage(),
             ], now()->addMinutes(10));
-            throw $exception; // Re-throw the exception to trigger the failed() method
-        }
 
+            throw $exception; // re-throw so failed() runs and the job is marked failed
+        }
     }
 
     public function failed(\Throwable $exception): void
     {
-        // Handle the failure, e.g., log the error, notify the user, etc.
-        \Log::channel('ai_desc_generation')->error('AI description generation job failed', [
-            'product_id' => $this->data['product_id'],
+        Log::channel('ai_desc_generation')->error('AI description generation job failed', [
+            'job_id' => $this->data['job_id'],
             'user_id' => $this->data['user_id'] ?? null,
             'error' => $exception->getMessage(),
         ]);

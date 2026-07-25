@@ -20,7 +20,7 @@ class AiDescGeneratorController extends Controller
         $validatedData = $request->validated();
 
         $jobId = Str::uuid()->toString();
-        $cacheKey = 'ai_desc_'.$jobId;
+        $cacheKey = GenerateDescText::cacheKey($jobId);
 
         Cache::put($cacheKey, [
             'status' => 'pending',
@@ -29,7 +29,11 @@ class AiDescGeneratorController extends Controller
             'generated_text' => null,
         ], now()->addMinutes(10));
 
-        GenerateDescText::dispatch($validatedData, app()->make(textGeneratorService::class));
+        GenerateDescText::dispatch([
+            ...$validatedData,
+            'job_id' => $jobId,
+            'user_id' => auth()->id(),
+        ]);
 
         Log::channel('products')->info('ai enhancement job queued', [
             'job_id' => $jobId,

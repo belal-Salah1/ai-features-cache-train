@@ -127,6 +127,22 @@ return [
             'path' => storage_path('logs/laravel.log'),
         ],
 
+        'products' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/products.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'days' => env('LOG_DAILY_DAYS', 14),
+            'replace_placeholders' => true,
+        ],
+
+        'ai_desc_generation' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/ai_desc_generation.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'days' => env('LOG_DAILY_DAYS', 14),
+            'replace_placeholders' => true,
+        ],
+
     ],
 
 ];
