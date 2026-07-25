@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AiLog;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -27,6 +28,12 @@ class TextGeneratorService
             $data['details'] ?? $data['description'] ?? '',
         );
 
+        $cacheKey = $this->resultCacheKey($model, $prompt);
+
+        if (config('ai.cache.enabled') && ($cached = Cache::get($cacheKey)) !== null) {
+            return $cached;
+        }
+
         $context = [
             'prompt' => $prompt,
             'model' => $model,
@@ -46,6 +53,10 @@ class TextGeneratorService
             }
 
             AiLog::create([...$context, 'response' => $text]);
+
+            if (config('ai.cache.enabled')) {
+                Cache::put($cacheKey, $text, config('ai.cache.ttl'));
+            }
 
             return $text;
         } catch (Throwable $exception) {
@@ -109,5 +120,14 @@ class TextGeneratorService
     private function endpoint(string $model): string
     {
         return "models/{$model}:generateContent";
+    }
+
+    /**
+     * Content-based key so identical (model + prompt) requests reuse a
+     * previously generated result instead of calling Gemini again.
+     */
+    private function resultCacheKey(string $model, string $prompt): string
+    {
+        return 'ai_desc_result_'.md5($model.'|'.$prompt);
     }
 }
