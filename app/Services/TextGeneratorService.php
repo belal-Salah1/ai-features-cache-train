@@ -11,14 +11,50 @@ class TextGeneratorService
     public function generateText(array $data, string $role = 'user'): string
     {
         $model = config('ai.models.generateDescText');
-        $prompt = $role === 'user'
-            ? $this->userPrompt($data['product_name'], $data['product_details'])
-            : $this->systemPrompt();
+       
+        $messages = [
+            [
+                'role' => $role,
+                'content' => [
+                    ['type' => 'text', 'text' => $this->getPromptRole('user')],
+                ],
 
-        return $prompt;
+            ],
+            [
+                'role' => 'system',
+                'content' => [
+                    ['type' => 'text', 'text' => $this->getPromptRole('system')],
+                ],
+            ],
+        ];
+        $payload = [
+            'model' => $model,
+            'messages' => $messages,
+            'temperature' => 0.5,
+            'max_output_tokens' => 500,
+        ];
+        try{
+            $response = $this->client()
+                ->post($this->endpoint($model), $payload)
+                ->throw();
+            return $response->json('candidates.0.content.parts.0.text');
+        }
+        catch(\Exception $e){
+            \Log::channel('ai')->error('AI text generation failed: '.$e->getMessage());
+            return 'Error generating text.';
+
+        }
+        
     }
 
-     /**
+    public function getPromptRole(string $role): string
+    {
+        return $role === 'user'
+                   ? $this->userPrompt($data['product_name'], $data['product_details'])
+                   : $this->systemPrompt();
+    }
+
+    /**
      * Build the Gemini "generateContent" endpoint for the given model,
      * relative to the configured base URL. Call it like:
      *
@@ -29,7 +65,6 @@ class TextGeneratorService
      *       ->throw();
      *   $text = $response->json('candidates.0.content.parts.0.text');
      */
-
     public function userPrompt(string $productName, string $productDetails): string
     {
         return 'Product Name: '.$productName."\n".'Product Details: '.$productDetails."\n\n".'Please generate a 3 compelling product description based on the above information.';
@@ -53,7 +88,6 @@ class TextGeneratorService
             ->acceptJson();
     }
 
-   
     private function endpoint(string $model): string
     {
         return "models/{$model}:generateContent";
