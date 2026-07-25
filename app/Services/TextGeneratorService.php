@@ -2,72 +2,90 @@
 
 namespace App\Services;
 
+use App\Models\AiLog;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class TextGeneratorService
 {
-    // Implement your AI text generation logic here.
-    public function generateText(array $data, string $role = 'user'): string
+    /**
+     * Generate a product description via Gemini.
+     *
+     * Every call is recorded in the ai_logs table (response on success,
+     * error_message on failure). Failures are re-thrown so the queued job
+     * can mark the request as failed and retry.
+     *
+     * @param  array<string, mixed>  $data  name, description, details, job_id, user_id
+     */
+    public function generateText(array $data): string
     {
         $model = config('ai.models.generateDescText');
-       
-        $messages = [
-            [
-                'role' => $role,
-                'content' => [
-                    ['type' => 'text', 'text' => $this->getPromptRole('user')],
-                ],
+        $prompt = $this->userPrompt(
+            $data['name'] ?? '',
+            $data['details'] ?? $data['description'] ?? '',
+        );
 
-            ],
-            [
-                'role' => 'system',
-                'content' => [
-                    ['type' => 'text', 'text' => $this->getPromptRole('system')],
-                ],
-            ],
-        ];
-        $payload = [
+        $context = [
+            'prompt' => $prompt,
             'model' => $model,
-            'messages' => $messages,
-            'temperature' => 0.5,
-            'max_output_tokens' => 500,
+            'request_id' => $data['job_id'] ?? null,
+            'call_site' => static::class.'@generateText',
         ];
-        try{
+
+        try {
             $response = $this->client()
-                ->post($this->endpoint($model), $payload)
+                ->post($this->endpoint($model), $this->payload($prompt))
                 ->throw();
-            return $response->json('candidates.0.content.parts.0.text');
-        }
-        catch(\Exception $e){
-            \Log::channel('ai')->error('AI text generation failed: '.$e->getMessage());
-            return 'Error generating text.';
 
-        }
-        
-    }
+            $text = $response->json('candidates.0.content.parts.0.text');
 
-    public function getPromptRole(string $role): string
-    {
-        return $role === 'user'
-                   ? $this->userPrompt($data['product_name'], $data['product_details'])
-                   : $this->systemPrompt();
+            if (blank($text)) {
+                throw new \RuntimeException('Gemini returned an empty response.');
+            }
+
+            AiLog::create([...$context, 'response' => $text]);
+
+            return $text;
+        } catch (Throwable $exception) {
+            AiLog::create([...$context, 'error_message' => $exception->getMessage()]);
+
+            Log::channel('ai_desc_generation')->error('AI text generation failed', [
+                'request_id' => $context['request_id'],
+                'model' => $model,
+                'error' => $exception->getMessage(),
+            ]);
+
+            throw $exception;
+        }
     }
 
     /**
-     * Build the Gemini "generateContent" endpoint for the given model,
-     * relative to the configured base URL. Call it like:
+     * Gemini "generateContent" request body: system instruction, the user
+     * prompt, and generation tuning.
      *
-     *   $response = $this->client()
-     *       ->post($this->endpoint($model), [
-     *           'contents' => [['parts' => [['text' => $prompt]]]],
-     *       ])
-     *       ->throw();
-     *   $text = $response->json('candidates.0.content.parts.0.text');
+     * @return array<string, mixed>
      */
+    private function payload(string $prompt): array
+    {
+        return [
+            'system_instruction' => [
+                'parts' => [['text' => $this->systemPrompt()]],
+            ],
+            'contents' => [
+                ['role' => 'user', 'parts' => [['text' => $prompt]]],
+            ],
+            'generationConfig' => [
+                'temperature' => 0.5,
+                'maxOutputTokens' => 500,
+            ],
+        ];
+    }
+
     public function userPrompt(string $productName, string $productDetails): string
     {
-        return 'Product Name: '.$productName."\n".'Product Details: '.$productDetails."\n\n".'Please generate a 3 compelling product description based on the above information.';
+        return 'Product Name: '.$productName."\n".'Product Details: '.$productDetails."\n\n".'Please generate a compelling product description based on the above information.';
     }
 
     public function systemPrompt(): string
