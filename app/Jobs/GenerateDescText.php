@@ -33,12 +33,7 @@ class GenerateDescText implements ShouldBeUnique, ShouldQueue
         $this->onQueue('ai_desc_generation');
     }
 
-    public function middleware(): array
-    {
-        return [
-            new WithoutOverlapping($this->uniqueId()),
-        ];
-    }
+    
 
     public function uniqueId(): string
     {
